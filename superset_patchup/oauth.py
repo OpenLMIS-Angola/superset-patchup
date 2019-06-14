@@ -49,11 +49,7 @@ class AuthOAuthView(SupersetAuthOAuthView):
                 appbuilder=self.appbuilder,
             )
         logging.debug(f"Going to call authorize for: {provider}")
-        state = jwt.encode(
-            request.args.to_dict(flat=False),
-            self.appbuilder.app.config["SECRET_KEY"],
-            algorithm="HS256",
-        )
+        state = self.generateState()
         try:
             if register:
                 logging.debug("Login to Register")
@@ -91,11 +87,7 @@ class AuthOAuthView(SupersetAuthOAuthView):
             ))
 
         logging.debug(f"Initialization of authorization process for: {provider}")
-        state = jwt.encode(
-            request.args.to_dict(flat=False),
-            self.appbuilder.app.config["SECRET_KEY"],
-            algorithm="HS256",
-        )
+        state = self.generateState()
         try:
             callback = None
             if provider == "twitter":
@@ -111,7 +103,6 @@ class AuthOAuthView(SupersetAuthOAuthView):
                     provider=provider,
                     _external=True
                 )
-
             session['%s_oauthredir' % provider] = callback
 
             return make_response(jsonify(
@@ -119,7 +110,7 @@ class AuthOAuthView(SupersetAuthOAuthView):
                 state=state
             ))
 
-        except Exception as err:  # pylint: disable=broad-except)
+        except Exception as err:
             logging.debug(f"Cannot generate and persist the callback for provider: {provider}")
             return make_response("", 500)
 
@@ -184,6 +175,12 @@ class AuthOAuthView(SupersetAuthOAuthView):
 
         return redirect(self.appbuilder.get_url_for_index)
 
+    def generateState(self):
+        return jwt.encode(
+            request.args.to_dict(flat=False),
+            self.appbuilder.app.config["SECRET_KEY"],
+            algorithm="HS256",
+        )
 
 class CustomSecurityManager(SupersetSecurityManager):
     """Custom Security Manager Class"""
