@@ -80,31 +80,17 @@ class AuthOAuthView(SupersetAuthOAuthView):
             flash(as_unicode(self.invalid_login_message), "warning")
             return redirect(redirect_url)
 
-    @expose("/login-init/<provider>")
+    @expose("/oauth-init/<provider>")
     def login_init(self, provider=None):
-        """The login view from AuthOAuthView"""
         logging.debug(f"Provider: {provider}")
 
-        # handle redirect
-        redirect_url = self.appbuilder.get_url_for_index
-        if request.args.get('redirect_url') is not None:
-            redirect_url = request.args.get('redirect_url')
-            if not is_safe_url(redirect_url):
-                logging.debug(f"Passed not safe redirect_url: {redirect_url}")
-                return make_response("", 400)
-
         if g.user is not None and g.user.is_authenticated:
-            logging.debug(f"Already authenticated {g.user}")
-            return redirect(redirect_url)
+            logging.debug(f"Provider {provider} is already authenticated by {g.user}")
+            return make_response(jsonify(
+                isAuthorized=True
+            ))
 
-        if provider is None:
-            return self.render_template(
-                self.login_template,
-                providers=self.appbuilder.sm.oauth_providers,
-                title=self.title,
-                appbuilder=self.appbuilder,
-            )
-        logging.debug(f"Going to call authorize for: {provider}")
+        logging.debug(f"Initialization of authorization process for: {provider}")
         state = jwt.encode(
             request.args.to_dict(flat=False),
             self.appbuilder.app.config["SECRET_KEY"],
@@ -117,7 +103,7 @@ class AuthOAuthView(SupersetAuthOAuthView):
                     ".oauth_authorized",
                     provider=provider,
                     _external=True,
-                    state=state,
+                    state=state
                 )
             else:
                 callback = url_for(
@@ -128,12 +114,14 @@ class AuthOAuthView(SupersetAuthOAuthView):
 
             session['%s_oauthredir' % provider] = callback
 
-            # return make_response("", 200)
-            return make_response(jsonify(state=state), 200)
+            return make_response(jsonify(
+                isAuthorized=False,
+                state=state
+            ))
 
         except Exception as err:  # pylint: disable=broad-except)
-            logging.debug(f"Cannot generate and persist the callback")
-            return make_response("", 400)
+            logging.debug(f"Cannot generate and persist the callback for provider: {provider}")
+            return make_response("", 500)
 
     @expose("/oauth-authorized/<provider>")
     # pylint: disable=too-many-branches
