@@ -80,8 +80,8 @@ class AuthOAuthView(SupersetAuthOAuthView):
             flash(as_unicode(self.invalid_login_message), "warning")
             return redirect(redirect_url)
 
-    @expose("/login-init/<provider>/<register>")
-    def login_init(self, provider=None, register=None):
+    @expose("/login-init/<provider>")
+    def login_init(self, provider=None):
         """The login view from AuthOAuthView"""
         logging.debug(f"Provider: {provider}")
 
@@ -110,10 +110,6 @@ class AuthOAuthView(SupersetAuthOAuthView):
             algorithm="HS256",
         )
         try:
-            if register:
-                logging.debug("Login to Register")
-                session["register"] = True
-
             callback = None
             if provider == "twitter":
                 callback = url_for(
@@ -132,6 +128,11 @@ class AuthOAuthView(SupersetAuthOAuthView):
             session['%s_oauthredir' % self.name] = callback
 
             return make_response("", 200)
+            # return jsonify(
+            #     username=g.user.username,
+            #     email=g.user.email,
+            #     id=g.user.id
+            # )
 
         except Exception as err:  # pylint: disable=broad-except)
             return make_response("", 400)
