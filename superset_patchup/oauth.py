@@ -2,7 +2,7 @@
 import logging
 import re
 
-from flask import abort, flash, g, redirect, request, session, url_for
+from flask import abort, flash, g, redirect, request, session, url_for, jsonify, make_response
 
 from flask_appbuilder._compat import as_unicode
 from flask_appbuilder.security.sqla import models as ab_models
@@ -79,6 +79,62 @@ class AuthOAuthView(SupersetAuthOAuthView):
             logging.error(f"Error on OAuth authorize: {err}")
             flash(as_unicode(self.invalid_login_message), "warning")
             return redirect(redirect_url)
+
+    @expose("/login-init/<provider>/<register>")
+    def login_init(self, provider=None, register=None):
+        """The login view from AuthOAuthView"""
+        logging.debug(f"Provider: {provider}")
+
+        # handle redirect
+        redirect_url = self.appbuilder.get_url_for_index
+        if request.args.get('redirect_url') is not None:
+            redirect_url = request.args.get('redirect_url')
+            if not is_safe_url(redirect_url):
+                return abort(400)
+
+        if g.user is not None and g.user.is_authenticated:
+            logging.debug(f"Already authenticated {g.user}")
+            return redirect(redirect_url)
+
+        if provider is None:
+            return self.render_template(
+                self.login_template,
+                providers=self.appbuilder.sm.oauth_providers,
+                title=self.title,
+                appbuilder=self.appbuilder,
+            )
+        logging.debug(f"Going to call authorize for: {provider}")
+        state = jwt.encode(
+            request.args.to_dict(flat=False),
+            self.appbuilder.app.config["SECRET_KEY"],
+            algorithm="HS256",
+        )
+        try:
+            if register:
+                logging.debug("Login to Register")
+                session["register"] = True
+
+            callback = None
+            if provider == "twitter":
+                callback = url_for(
+                    ".oauth_authorized",
+                    provider=provider,
+                    _external=True,
+                    state=state,
+                )
+            else:
+                callback = url_for(
+                    ".oauth_authorized",
+                    provider=provider,
+                    _external=True
+                )
+
+            session['%s_oauthredir' % self.name] = callback
+
+            return make_response("", 200)
+
+        except Exception as err:  # pylint: disable=broad-except)
+            return make_response("", 400)
 
     @expose("/oauth-authorized/<provider>")
     # pylint: disable=too-many-branches
