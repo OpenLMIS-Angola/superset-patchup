@@ -90,7 +90,8 @@ class AuthOAuthView(SupersetAuthOAuthView):
         if request.args.get('redirect_url') is not None:
             redirect_url = request.args.get('redirect_url')
             if not is_safe_url(redirect_url):
-                return abort(400)
+                logging.debug(f"Passed not safe redirect_url: {redirect_url}")
+                return make_response("", 400)
 
         if g.user is not None and g.user.is_authenticated:
             logging.debug(f"Already authenticated {g.user}")
@@ -125,16 +126,13 @@ class AuthOAuthView(SupersetAuthOAuthView):
                     _external=True
                 )
 
-            session['%s_oauthredir' % self.name] = callback
+            session['%s_oauthredir' % provider] = callback
 
-            return make_response("", 200)
-            # return jsonify(
-            #     username=g.user.username,
-            #     email=g.user.email,
-            #     id=g.user.id
-            # )
+            # return make_response("", 200)
+            return make_response(jsonify(state=state), 200)
 
         except Exception as err:  # pylint: disable=broad-except)
+            logging.debug(f"Cannot generate and persist the callback")
             return make_response("", 400)
 
     @expose("/oauth-authorized/<provider>")
