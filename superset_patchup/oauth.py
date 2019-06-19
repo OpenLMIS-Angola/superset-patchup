@@ -99,38 +99,20 @@ class AuthOAuthView(SupersetAuthOAuthView):
 
         logging.debug(f"Initialization of authorization process for: {provider}")
         state = self.generateState()
-        try:
-            callback = None
-            if provider == "twitter":
-                callback = url_for(
-                    ".oauth_authorized",
-                    provider=provider,
-                    _external=True,
-                    state=state
-                )
-            else:
-                callback = url_for(
-                    ".oauth_authorized",
-                    provider=provider,
-                    _external=True
-                )
-            logging.debug(f"Saving session for: {provider}; {self.appbuilder.sm.oauth_remotes[provider].name}")
-            session['%s_oauthredir' % self.appbuilder.sm.oauth_remotes[provider].name] = callback
-
-            return make_response(jsonify(
-                isAuthorized=False,
-                state=state
-            ))
-
-        except Exception as err:
-            logging.debug(f"Cannot generate and persist the callback for provider: {provider}")
-            return make_response("", 500)
+        self.clean_session_data(provider)
+        self.create_session_data_for_oauth_if_needed(provider, state)
+        return make_response(jsonify(
+            isAuthorized=False,
+            state=state
+        ))
 
     @expose("/oauth-authorized/<provider>")
     # pylint: disable=too-many-branches
     # pylint: disable=logging-fstring-interpolation
     def oauth_authorized(self, provider):
         """View that a user is redirected to from the Oauth server"""
+
+        self.create_session_data_for_oauth_if_needed(provider);
 
         logging.debug("Authorized init")
         resp = self.appbuilder.sm.oauth_remotes[provider].authorized_response()
@@ -186,6 +168,36 @@ class AuthOAuthView(SupersetAuthOAuthView):
             return redirect(redirect_url)
 
         return redirect(self.appbuilder.get_url_for_index)
+
+    def clean_session_data(self, provider):
+        if ('%s_oauthredir' % provider) in session:
+            session['%s_oauthredir' % provider] = None
+
+    def create_session_data_for_oauth_if_needed(self, provider, state = None):
+        if ('%s_oauthredir' % provider) not in session:
+            if state is None:
+                state = self.generateState()
+            try:
+                callback = None
+                if provider == "twitter":
+                    callback = url_for(
+                        ".oauth_authorized",
+                        provider=provider,
+                        _external=True,
+                        state=state
+                    )
+                else:
+                    callback = url_for(
+                        ".oauth_authorized",
+                        provider=provider,
+                        _external=True
+                    )
+                logging.debug(f"Saving session data for: {provider}")
+                session['%s_oauthredir' % provider] = callback
+
+            except Exception as err:
+                logging.debug(f"Cannot generate and persist the callback for provider: {provider}")
+                return make_response("", 500)
 
     def generateState(self):
         return jwt.encode(
@@ -338,62 +350,3 @@ class CustomSecurityManager(SupersetSecurityManager):
             }
 
         return None
-
-
-    def handle_oauth2_response(self):
-        """Handles an oauth2 authorization response."""
-
-        args = request.args
-
-        client = self.make_client()
-        remote_args = {
-            'code': args.get('code'),
-            'client_secret': self.consumer_secret,
-            'redirect_uri': session.get('%s_oauthredir' % self.name)
-        }
-        log.debug('Prepare oauth2 remote args %r', remote_args)
-        remote_args.update(self.access_token_params)
-        headers = copy(self._access_token_headers)
-        if self.access_token_method == 'GET':
-            qs = client.prepare_request_body(**remote_args)
-            url = self.expand_url(self.access_token_url)
-            url += ('?' in url and '&' or '?') + qs
-            resp, content = self.http_request(
-                url,
-                headers=headers,
-                method=self.access_token_method,
-            )
-        else:
-            raise OAuthException(
-                'Unsupported access_token_method: %s' %
-                self.access_token_method
-            )
-
-        data = parse_response(resp, content, content_type=self.content_type)
-        if resp.code not in (200, 201):
-            raise OAuthException(
-                'Invalid response from %s' % self.name,
-                type='invalid_response', data=data
-            )
-        return data
-
-    def make_client(self, token=None):
-        # request_token_url is for oauth1
-        if self.request_token_url:
-            # get params for client
-            params = self.get_oauth1_client_params(token)
-            client = oauthlib.oauth1.Client(
-                client_key=self.consumer_key,
-                client_secret=self.consumer_secret,
-                **params
-            )
-        else:
-            if token:
-                if isinstance(token, (tuple, list)):
-                    token = {'access_token': token[0]}
-                elif isinstance(token, string_types):
-                    token = {'access_token': token}
-            client = oauthlib.oauth2.WebApplicationClient(
-                self.consumer_key, token=token
-            )
-        return client
