@@ -17,10 +17,21 @@ from flask_login import login_user
 
 from superset_patchup.utils import is_safe_url, is_valid_provider
 
-
 class AuthOAuthView(SupersetAuthOAuthView):
     """ Flask-AppBuilder's Authentication OAuth view"""
     login_template = "appbuilder/general/security/login_oauth.html"
+
+    # @self.appbuilder.app.before_request
+    # def log_request_info():
+    #     logging.debug('Headers: %s', request.headers)
+    #     logging.debug('Body: %s', request.get_data())
+
+    # @self.appbuilder.app.after_request
+    # def after_request(response):
+    #     timestamp = strftime('[%Y-%b-%d %H:%M]')
+    #     logging.error('%s %s %s %s %s %s', timestamp, request.remote_addr, request.method, request.scheme, request.full_path, response.status)
+    #     logging.debug('Headers: %s', request.headers)
+    #     logging.debug('Body: %s', request.get_data())
 
     @expose("/login/")
     @expose("/login/<provider>")
@@ -103,7 +114,8 @@ class AuthOAuthView(SupersetAuthOAuthView):
                     provider=provider,
                     _external=True
                 )
-            session['%s_oauthredir' % provider] = callback
+            logging.debug(f"Saving session for: {provider}; {self.appbuilder.sm.oauth_remotes[provider].name}")
+            session['%s_oauthredir' % self.appbuilder.sm.oauth_remotes[provider].name] = callback
 
             return make_response(jsonify(
                 isAuthorized=False,
@@ -326,3 +338,62 @@ class CustomSecurityManager(SupersetSecurityManager):
             }
 
         return None
+
+
+    def handle_oauth2_response(self):
+        """Handles an oauth2 authorization response."""
+
+        args = request.args
+
+        client = self.make_client()
+        remote_args = {
+            'code': args.get('code'),
+            'client_secret': self.consumer_secret,
+            'redirect_uri': session.get('%s_oauthredir' % self.name)
+        }
+        log.debug('Prepare oauth2 remote args %r', remote_args)
+        remote_args.update(self.access_token_params)
+        headers = copy(self._access_token_headers)
+        if self.access_token_method == 'GET':
+            qs = client.prepare_request_body(**remote_args)
+            url = self.expand_url(self.access_token_url)
+            url += ('?' in url and '&' or '?') + qs
+            resp, content = self.http_request(
+                url,
+                headers=headers,
+                method=self.access_token_method,
+            )
+        else:
+            raise OAuthException(
+                'Unsupported access_token_method: %s' %
+                self.access_token_method
+            )
+
+        data = parse_response(resp, content, content_type=self.content_type)
+        if resp.code not in (200, 201):
+            raise OAuthException(
+                'Invalid response from %s' % self.name,
+                type='invalid_response', data=data
+            )
+        return data
+
+    def make_client(self, token=None):
+        # request_token_url is for oauth1
+        if self.request_token_url:
+            # get params for client
+            params = self.get_oauth1_client_params(token)
+            client = oauthlib.oauth1.Client(
+                client_key=self.consumer_key,
+                client_secret=self.consumer_secret,
+                **params
+            )
+        else:
+            if token:
+                if isinstance(token, (tuple, list)):
+                    token = {'access_token': token[0]}
+                elif isinstance(token, string_types):
+                    token = {'access_token': token}
+            client = oauthlib.oauth2.WebApplicationClient(
+                self.consumer_key, token=token
+            )
+        return client
