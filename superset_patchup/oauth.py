@@ -21,18 +21,6 @@ class AuthOAuthView(SupersetAuthOAuthView):
     """ Flask-AppBuilder's Authentication OAuth view"""
     login_template = "appbuilder/general/security/login_oauth.html"
 
-    # @self.appbuilder.app.before_request
-    # def log_request_info():
-    #     logging.debug('Headers: %s', request.headers)
-    #     logging.debug('Body: %s', request.get_data())
-
-    # @self.appbuilder.app.after_request
-    # def after_request(response):
-    #     timestamp = strftime('[%Y-%b-%d %H:%M]')
-    #     logging.error('%s %s %s %s %s %s', timestamp, request.remote_addr, request.method, request.scheme, request.full_path, response.status)
-    #     logging.debug('Headers: %s', request.headers)
-    #     logging.debug('Body: %s', request.get_data())
-
     @expose("/login/")
     @expose("/login/<provider>")
     @expose("/login/<provider>/<register>")
@@ -97,10 +85,17 @@ class AuthOAuthView(SupersetAuthOAuthView):
                 isAuthorized=True
             ))
 
+        redirect_url = request.args.get("redirect_url")
+        if not redirect_url or not is_safe_url(redirect_url):
+            logging.debug(f"The arg redirect_url not found or not safe")
+            return abort(400)
+
         logging.debug(f"Initialization of authorization process for: {provider}")
+
+        # libraries assume that 'redirect_url' should be available in the session
+        session['%s_oauthredir' % provider] = redirect_url
+
         state = self.generateState()
-        self.clean_session_data(provider)
-        self.create_session_data_for_oauth_if_needed(provider, state)
         return make_response(jsonify(
             isAuthorized=False,
             state=state
@@ -111,8 +106,6 @@ class AuthOAuthView(SupersetAuthOAuthView):
     # pylint: disable=logging-fstring-interpolation
     def oauth_authorized(self, provider):
         """View that a user is redirected to from the Oauth server"""
-
-        self.create_session_data_for_oauth_if_needed(provider);
 
         logging.debug("Authorized init")
         resp = self.appbuilder.sm.oauth_remotes[provider].authorized_response()
@@ -168,36 +161,6 @@ class AuthOAuthView(SupersetAuthOAuthView):
             return redirect(redirect_url)
 
         return redirect(self.appbuilder.get_url_for_index)
-
-    def clean_session_data(self, provider):
-        if ('%s_oauthredir' % provider) in session:
-            session['%s_oauthredir' % provider] = None
-
-    def create_session_data_for_oauth_if_needed(self, provider, state = None):
-        if ('%s_oauthredir' % provider) not in session:
-            if state is None:
-                state = self.generateState()
-            try:
-                callback = None
-                if provider == "twitter":
-                    callback = url_for(
-                        ".oauth_authorized",
-                        provider=provider,
-                        _external=True,
-                        state=state
-                    )
-                else:
-                    callback = url_for(
-                        ".oauth_authorized",
-                        provider=provider,
-                        _external=True
-                    )
-                logging.debug(f"Saving session data for: {provider}")
-                session['%s_oauthredir' % provider] = callback
-
-            except Exception as err:
-                logging.debug(f"Cannot generate and persist the callback for provider: {provider}")
-                return make_response("", 500)
 
     def generateState(self):
         return jwt.encode(
